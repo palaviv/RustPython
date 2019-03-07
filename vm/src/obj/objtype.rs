@@ -262,8 +262,8 @@ pub fn get_attributes(obj: &PyObjectRef) -> PyAttributes {
 
     // Get module attributes:
     if let PyObjectPayload::Module { ref scope, .. } = &obj.payload {
-        for (name, value) in scope.locals.get_key_value_pairs().iter() {
-            attributes.insert(objstr::get_value(name).to_string(), value.clone());
+        for (name, value) in scope.locals.borrow().iter() {
+            attributes.insert(name.to_string(), value.clone());
         }
     }
     attributes

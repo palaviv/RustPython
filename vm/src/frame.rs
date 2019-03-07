@@ -11,14 +11,13 @@ use crate::import::{import, import_module};
 use crate::obj::objbool;
 use crate::obj::objcode;
 use crate::obj::objdict;
-use crate::obj::objdict::PyDict;
 use crate::obj::objiter;
 use crate::obj::objlist;
 use crate::obj::objstr;
 use crate::obj::objtype;
 use crate::pyobject::{
-    DictProtocol, IdProtocol, PyFuncArgs, PyObject, PyObjectPayload, PyObjectRef, PyResult,
-    TypeProtocol,
+    DictProtocol, IdProtocol, PyAttributes, PyFuncArgs, PyObject, PyObjectPayload, PyObjectRef,
+    PyResult, TypeProtocol,
 };
 use crate::vm::VirtualMachine;
 use num_bigint::BigInt;
@@ -30,15 +29,25 @@ use std::rc::Rc;
  */
 #[derive(Debug)]
 pub struct Scope {
-    pub locals: PyObjectRef, // Variables
-    // TODO: pub locals: RefCell<PyAttributes>,         // Variables
-    pub parent: Option<Rc<Scope>>, // Parent scope
+    pub locals: RefCell<PyAttributes>, // Variables
+    pub parent: Option<Rc<Scope>>,     // Parent scope
 }
 pub type ScopeRef = Rc<Scope>;
 
 impl Scope {
-    pub fn new(locals: PyObjectRef, parent: Option<ScopeRef>) -> ScopeRef {
+    pub fn new(locals: RefCell<PyAttributes>, parent: Option<ScopeRef>) -> ScopeRef {
         Rc::new(Scope { locals, parent })
+    }
+
+    pub fn new_from_dict(locals: PyObjectRef, parent: Option<ScopeRef>) -> ScopeRef {
+        Rc::new(Scope {
+            locals: RefCell::new(objdict::py_dict_to_attributes(&locals)),
+            parent,
+        })
+    }
+
+    pub fn locals_to_dict(&self, vm: &mut VirtualMachine) -> PyObjectRef {
+        objdict::attributes_to_py_dict(vm, self.locals.borrow().clone())
     }
 }
 
@@ -722,10 +731,11 @@ impl Frame {
         // Grab all the names from the module and put them in the context
         let obj = import_module(vm, current_path, module)?;
 
-        for (k, v) in obj.get_key_value_pairs().iter() {
+        for (k, v) in obj.get_key_value_pairs(vm).iter() {
             self.scope
                 .locals
-                .set_item(&vm.ctx, &objstr::get_value(k), v.clone());
+                .borrow_mut()
+                .insert(objstr::get_value(k), v.clone());
         }
         Ok(None)
     }
@@ -847,13 +857,12 @@ impl Frame {
 
     fn store_name(&self, vm: &mut VirtualMachine, name: &str) -> FrameResult {
         let obj = self.pop_value();
-        self.scope.locals.set_item(&vm.ctx, name, obj);
+        self.scope.locals.borrow_mut().insert(name.to_string(), obj);
         Ok(None)
     }
 
     fn delete_name(&self, vm: &mut VirtualMachine, name: &str) -> FrameResult {
-        let name = vm.ctx.new_str(name.to_string());
-        vm.call_method(&self.scope.locals, "__delitem__", vec![name])?;
+        self.scope.locals.borrow_mut().remove(name);
         Ok(None)
     }
 
@@ -861,9 +870,10 @@ impl Frame {
         // Lookup name in scope and put it onto the stack!
         let mut scope = self.scope.clone();
         loop {
-            if scope.locals.contains_key(name) {
-                let obj = scope.locals.get_item(name).unwrap();
-                self.push_value(obj);
+            if scope.locals.borrow().contains_key(name) {
+                let locals = scope.locals.borrow();
+                let obj = locals.get(name).unwrap();
+                self.push_value(obj.clone());
                 return Ok(None);
             }
             match &scope.parent {
@@ -1126,14 +1136,14 @@ impl fmt::Debug for Frame {
             .map(|elem| format!("\n  > {:?}", elem))
             .collect::<Vec<_>>()
             .join("");
-        let local_str = match self.scope.locals.payload::<PyDict>() {
-            Some(dict) => objdict::get_key_value_pairs_from_content(&dict.entries.borrow())
-                .iter()
-                .map(|elem| format!("\n  {:?} = {:?}", elem.0, elem.1))
-                .collect::<Vec<_>>()
-                .join(""),
-            None => panic!("locals unexpectedly not wrapping a dict!",),
-        };
+        let local_str = self
+            .scope
+            .locals
+            .borrow()
+            .iter()
+            .map(|elem| format!("\n  {:?} = {:?}", elem.0, elem.1))
+            .collect::<Vec<_>>()
+            .join("");
         write!(
             f,
             "Frame Object {{ \n Stack:{}\n Blocks:{}\n Locals:{}\n}}",

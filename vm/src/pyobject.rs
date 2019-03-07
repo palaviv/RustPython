@@ -571,7 +571,7 @@ impl PyContext {
     }
 
     pub fn new_scope(&self, parent: Option<ScopeRef>) -> ScopeRef {
-        let locals = self.new_dict();
+        let locals = RefCell::new(PyAttributes::new());
         Rc::new(Scope { locals, parent })
     }
 
@@ -686,7 +686,10 @@ impl PyContext {
     pub fn set_attr(&self, obj: &PyObjectRef, attr_name: &str, value: PyObjectRef) {
         match obj.payload {
             PyObjectPayload::Module { ref scope, .. } => {
-                scope.locals.set_item(self, attr_name, value)
+                scope
+                    .locals
+                    .borrow_mut()
+                    .insert(attr_name.to_string(), value);
             }
             PyObjectPayload::Instance { ref dict } | PyObjectPayload::Class { ref dict, .. } => {
                 dict.borrow_mut().insert(attr_name.to_string(), value);
@@ -792,7 +795,9 @@ fn class_has_item(class: &PyObjectRef, attr_name: &str) -> bool {
 impl AttributeProtocol for PyObjectRef {
     fn get_attr(&self, attr_name: &str) -> Option<PyObjectRef> {
         match self.payload {
-            PyObjectPayload::Module { ref scope, .. } => scope.locals.get_item(attr_name),
+            PyObjectPayload::Module { ref scope, .. } => {
+                scope.locals.borrow().get(attr_name).cloned()
+            }
             PyObjectPayload::Class { ref mro, .. } => {
                 if let Some(item) = class_get_item(self, attr_name) {
                     return Some(item);
@@ -811,7 +816,9 @@ impl AttributeProtocol for PyObjectRef {
 
     fn has_attr(&self, attr_name: &str) -> bool {
         match self.payload {
-            PyObjectPayload::Module { ref scope, .. } => scope.locals.contains_key(attr_name),
+            PyObjectPayload::Module { ref scope, .. } => {
+                scope.locals.borrow().contains_key(attr_name)
+            }
             PyObjectPayload::Class { ref mro, .. } => {
                 class_has_item(self, attr_name) || mro.iter().any(|d| class_has_item(d, attr_name))
             }
@@ -824,7 +831,7 @@ impl AttributeProtocol for PyObjectRef {
 pub trait DictProtocol {
     fn contains_key(&self, k: &str) -> bool;
     fn get_item(&self, k: &str) -> Option<PyObjectRef>;
-    fn get_key_value_pairs(&self) -> Vec<(PyObjectRef, PyObjectRef)>;
+    fn get_key_value_pairs(&self, vm: &mut VirtualMachine) -> Vec<(PyObjectRef, PyObjectRef)>;
     fn set_item(&self, ctx: &PyContext, key: &str, v: PyObjectRef);
 }
 
@@ -842,18 +849,23 @@ impl DictProtocol for PyObjectRef {
             objdict::content_get_key_str(&dict.entries.borrow(), k)
         } else {
             match self.payload {
-                PyObjectPayload::Module { ref scope, .. } => scope.locals.get_item(k),
+                PyObjectPayload::Module { ref scope, .. } => scope.locals.borrow().get(k).cloned(),
                 ref k => panic!("TODO {:?}", k),
             }
         }
     }
 
-    fn get_key_value_pairs(&self) -> Vec<(PyObjectRef, PyObjectRef)> {
+    fn get_key_value_pairs(&self, vm: &mut VirtualMachine) -> Vec<(PyObjectRef, PyObjectRef)> {
         if let Some(_) = self.payload::<PyDict>() {
             objdict::get_key_value_pairs(self)
         } else {
             match self.payload {
-                PyObjectPayload::Module { ref scope, .. } => scope.locals.get_key_value_pairs(),
+                PyObjectPayload::Module { ref scope, .. } => scope
+                    .locals
+                    .borrow()
+                    .iter()
+                    .map(|(k, v)| (vm.ctx.new_str(k.to_string()), v.clone()))
+                    .collect(),
                 _ => panic!("TODO"),
             }
         }
@@ -867,7 +879,7 @@ impl DictProtocol for PyObjectRef {
         } else {
             match &self.payload {
                 PyObjectPayload::Module { scope, .. } => {
-                    scope.locals.set_item(ctx, key, v);
+                    scope.locals.borrow_mut().insert(key.to_string(), v);
                 }
                 ref k => panic!("TODO {:?}", k),
             };

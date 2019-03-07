@@ -3,6 +3,7 @@
 //! Implements functions listed here: https://docs.python.org/3/library/builtins.html
 
 // use std::ops::Deref;
+use std::cell::RefCell;
 use std::char;
 use std::io::{self, Write};
 
@@ -16,7 +17,8 @@ use crate::obj::objtype;
 
 use crate::frame::{Scope, ScopeRef};
 use crate::pyobject::{
-    AttributeProtocol, IdProtocol, PyContext, PyFuncArgs, PyObjectRef, PyResult, TypeProtocol,
+    AttributeProtocol, IdProtocol, PyAttributes, PyContext, PyFuncArgs, PyObjectRef, PyResult,
+    TypeProtocol,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -280,15 +282,16 @@ fn make_scope(
 
     let current_scope = vm.current_scope();
     let parent = match globals {
-        Some(dict) => Some(Scope::new(dict.clone(), Some(vm.get_builtin_scope()))),
+        Some(dict) => Some(Scope::new_from_dict(
+            dict.clone(),
+            Some(vm.get_builtin_scope()),
+        )),
         None => current_scope.parent.clone(),
     };
-    let locals = match locals {
-        Some(dict) => dict.clone(),
-        None => current_scope.locals.clone(),
-    };
-
-    Ok(Scope::new(locals, parent))
+    match locals {
+        Some(dict) => Ok(Scope::new_from_dict(dict.clone(), parent)),
+        None => Ok(Scope::new(current_scope.locals.clone(), parent)),
+    }
 }
 
 fn builtin_format(vm: &mut VirtualMachine, args: PyFuncArgs) -> PyResult {

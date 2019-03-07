@@ -6,6 +6,7 @@
 
 extern crate rustpython_parser;
 
+use std::cell::RefCell;
 use std::collections::hash_map::HashMap;
 use std::collections::hash_set::HashSet;
 use std::rc::Rc;
@@ -24,8 +25,8 @@ use crate::obj::objsequence;
 use crate::obj::objstr;
 use crate::obj::objtype;
 use crate::pyobject::{
-    AttributeProtocol, DictProtocol, IdProtocol, PyContext, PyFuncArgs, PyObjectPayload,
-    PyObjectRef, PyResult, TypeProtocol,
+    AttributeProtocol, DictProtocol, IdProtocol, PyAttributes, PyContext, PyFuncArgs,
+    PyObjectPayload, PyObjectRef, PyResult, TypeProtocol,
 };
 use crate::stdlib;
 use crate::sysmodule;
@@ -202,7 +203,8 @@ impl VirtualMachine {
 
     pub fn get_locals(&self) -> PyObjectRef {
         let scope = self.current_scope();
-        scope.locals.clone()
+        // TODO: fix
+        self.get_none()
     }
 
     pub fn context(&self) -> &PyContext {
@@ -321,7 +323,7 @@ impl VirtualMachine {
     ) -> PyResult {
         let code_object = objcode::get_value(code);
         let scope = self.ctx.new_scope(Some(scope.clone()));
-        self.fill_locals_from_args(&code_object, &scope.locals, args, defaults)?;
+        self.fill_locals_from_args(&code_object, &mut scope.locals.borrow_mut(), args, defaults)?;
 
         // Construct frame:
         let frame = self.ctx.new_frame(code.clone(), scope);
@@ -341,10 +343,7 @@ impl VirtualMachine {
             defaults: _defaults,
         } = &function.payload
         {
-            let scope = Rc::new(Scope {
-                locals,
-                parent: Some(scope.clone()),
-            });
+            let scope = Scope::new_from_dict(locals, Some(scope.clone()));
             let frame = self.ctx.new_frame(code.clone(), scope);
             return self.run_frame_full(frame);
         }
@@ -357,7 +356,7 @@ impl VirtualMachine {
     fn fill_locals_from_args(
         &mut self,
         code_object: &bytecode::CodeObject,
-        locals: &PyObjectRef,
+        locals: &mut PyAttributes,
         args: PyFuncArgs,
         defaults: &PyObjectRef,
     ) -> PyResult<()> {
@@ -380,7 +379,7 @@ impl VirtualMachine {
         for i in 0..n {
             let arg_name = &code_object.arg_names[i];
             let arg = &args.args[i];
-            locals.set_item(&self.ctx, arg_name, arg.clone());
+            locals.insert(arg_name.to_string(), arg.clone());
         }
 
         // Pack other positional arguments in to *args:
@@ -394,7 +393,7 @@ impl VirtualMachine {
 
             // If we have a name (not '*' only) then store it:
             if let Some(vararg_name) = vararg {
-                locals.set_item(&self.ctx, vararg_name, vararg_value);
+                locals.insert(vararg_name.to_string(), vararg_value);
             }
         } else {
             // Check the number of positional arguments
@@ -412,7 +411,7 @@ impl VirtualMachine {
 
             // Store when we have a name:
             if let Some(kwargs_name) = kwargs {
-                locals.set_item(&self.ctx, &kwargs_name, d.clone());
+                locals.insert(kwargs_name.to_string(), d.clone());
             }
 
             Some(d)
@@ -431,7 +430,7 @@ impl VirtualMachine {
                     );
                 }
 
-                locals.set_item(&self.ctx, &name, value);
+                locals.insert(name.to_string(), value);
             } else if let Some(d) = &kwargs {
                 d.set_item(&self.ctx, &name, value);
             } else {
@@ -473,9 +472,8 @@ impl VirtualMachine {
             for (default_index, i) in (required_args..nexpected_args).enumerate() {
                 let arg_name = &code_object.arg_names[i];
                 if !locals.contains_key(arg_name) {
-                    locals.set_item(
-                        &self.ctx,
-                        arg_name,
+                    locals.insert(
+                        arg_name.to_string(),
                         available_defaults[default_index].clone(),
                     );
                 }

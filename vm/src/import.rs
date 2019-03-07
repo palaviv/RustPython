@@ -45,7 +45,8 @@ fn import_uncached_module(
     let scope = vm.ctx.new_scope(Some(builtins));
     scope
         .locals
-        .set_item(&vm.ctx, "__name__", vm.new_str(module.to_string()));
+        .borrow_mut()
+        .insert("__name__".to_string(), vm.new_str(module.to_string()));
     vm.run_code_obj(code_obj, scope.clone())?;
     Ok(vm.ctx.new_module(module, scope))
 }
