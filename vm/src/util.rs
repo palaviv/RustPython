@@ -8,6 +8,9 @@ pub fn read_file(path: &Path) -> Result<String> {
     let mut f = File::open(&path)?;
     let mut buffer = String::new();
     f.read_to_string(&mut buffer)?;
-
-    Ok(buffer)
+    if buffer.ends_with("\n") {
+        Ok(buffer)
+    } else {
+        Ok(buffer + "\n")
+    }
 }
