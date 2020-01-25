@@ -860,7 +860,7 @@ fn os_symlink(
                 panic!("Uknown file type");
             }
         }
-        Err(_) => win_fs::symlink_file(src.as_str(), dst.as_str()),
+        Err(_) => panic!("Testing"),
     };
     ret.map_err(|err| convert_io_error(vm, err))
 }
