@@ -75,6 +75,7 @@ class TestWithTempDir():
             name = name + "_"
 
         os.mkdir(name)
+        print("TEMP dir", name)
         self.name = name
         return name
 
@@ -164,6 +165,7 @@ with TestWithTempDir() as tmpdir:
 	for dir_entry in os.scandir(tmpdir):
 		names.add(dir_entry.name)
 		paths.add(dir_entry.path)
+		print("dir entry", dir_entry.name, dir_entry)
 		if dir_entry.is_dir():
 			assert stat.S_ISDIR(dir_entry.stat().st_mode) == True
 			dirs.add(dir_entry.name)
