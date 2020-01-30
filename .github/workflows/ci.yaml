@@ -17,7 +17,7 @@ jobs:
       - name: Convert symlinks to hardlink (windows only)
         run: powershell.exe scripts/symlinks-to-hardlinks.ps1
         if: matrix.os == 'windows-latest'
-      - name: Cache cargo registry
+      - name: Cache cargo registry1
         uses: actions/cache@v1
         with:
           path: ~/.cargo/registry
